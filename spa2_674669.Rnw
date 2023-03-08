@@ -1,0 +1,773 @@
+\documentclass[a4paper]{article}
+\usepackage[a4paper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
+
+% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+\usepackage{array}
+\setlength{\parindent}{0em}
+\setlength{\parskip}{1em}
+
+\usepackage{geometry}
+\geometry{verbose, tmargin = 2.5cm, bmargin = 2.5cm, lmargin = 2.5cm, rmargin = 2.5cm}
+
+\title{\vspace{-3ex}Scientific Programming Assignment 2}
+\author{\vspace{-1ex}ID: 674669}
+\date{\vspace{-5ex}}
+
+\begin{document}
+\maketitle
+
+<<import, echo=FALSE>>=
+library(knitr)
+@
+
+
+\section{Sujiko problems}
+(Thanks to the Telegraph newspaper for these problems.) To solve the puzzle, the numbers 1 to 9 must be placed in the grid squares (without repetition) such that the total in each circle equals the sum of the numbers in the surrounding four squares.
+
+\begin{enumerate}
+\item \textit{Write the function} \texttt{drawgrid} \textit{so that, given the four sums in the circles and any numbers in the squares, the problem is drawn. Use your function to draw the three grids shown in Figure 1.}
+\end{enumerate}
+
+\begin{figure}[h!]
+\centering
+<<drawgrid, fig=TRUE, fig.width=9, fig.height=3, echo=FALSE>>=
+data1 <- function(d){
+scan(quiet=TRUE,
+paste0("https://raw.githubusercontent.com/sje30/sp2022/",
+"main/assigns/a2/s/", d))
+}
+
+drawgrid <- function(s, g, main){
+  # Initialise plot
+  plot(s,xlim=c(0,3), ylim=c(0,3), axes=FALSE, main = main)
+  
+  # Draw lines 
+  segments(0,0,3,0)
+  segments(0,0,0,3)
+  segments(0,3,3,3)
+  segments(3,3,3,0)
+  segments(0,1,3,1)
+  segments(0,2,3,2)
+  segments(1,3,1,0)
+  segments(2,3,2,0)
+  
+  coords <- data.frame(x = c(0.5,1.5,2.5, 0.5,1.5,2.5, 0.5,1.5,2.5), 
+                       y = c(2.5, 2.5, 2.5, 1.5, 1.5, 1.5, 0.5, 0.5, 0.5))
+  
+  for (i in seq(1, 9, by = 1)){
+    if (g[i] != 0){
+      text(coords$x[i], coords$y[i], labels=g[i])
+    }
+  }
+    
+  # Add symbols and text 
+  symbols(1, 2, circles = 0.25, inches = FALSE, add = TRUE, bg= 'white')
+  text(1,2, labels = s[1])
+  
+  symbols(2, 2, circles = 0.25, inches = FALSE, add = TRUE, bg= 'white')
+  text(2,2, labels = s[2])
+  
+  symbols(1, 1, circles = 0.25, inches = FALSE, add = TRUE, bg= 'white')
+  text(1,1, labels = s[3])
+  
+  symbols(2, 1, circles = 0.25, inches = FALSE, add = TRUE, bg= 'white')
+  text(2,1, labels = s[4])
+  
+}
+
+par(mfrow=c(1,3),mar=c(2,2,1.5,1))
+drawgrid(data1('s1.dat'), data1('g1.dat'), main='A')
+drawgrid(data1('s2.dat'), data1('g2.dat'), main='B')
+drawgrid(data1('s3.dat'), data1('g3.dat'), main='C')
+
+@
+\caption{\small{Three Sujiko problems to be solved.}}
+\label{fig:unsolved_sujiko}
+\end{figure}
+
+\begin{enumerate}
+\setcounter{enumi}{1}
+\item \textit{Write a function to solve a Sujiko problem.}
+\end{enumerate}
+
+As described above - Sujiko puzzles are solved by arranging the digits 1-9 in a 3x3 grid, so that the value in each circle corresponds to the sum of the surrounding cells. The state search space for a potential solution is remarkably small - there are only $9! = 362 880$ possible digit permutations. However, with $n$ clues, it is only necessary to consider $(9 - n)!$ solutions. Therefore, it is possible to solve the puzzle via an exhaustive search. 
+
+The state search space can be further reduced by considering that:
+\begin{align*}
+x_1 + x_2 + x_4 + x_5 &= s_1 \\
+x_2 + x_3 + x_5 + x_6 &= s_2 \\
+x_4 + x_5 + x_7 + x_8 &= s_3 \\
+x_5 + x_6 + x_8 + x_9 &= s_4
+\end{align*}
+where $x_i$ indicates the values of each digit 1-9 and its position in the grid, and $s_i$ indicates the values of the sums in each circle. Hence, we can exclude all permutations where
+$$ x_1 + 2x_2 + x_3 + 2x_4 + 4x_5 + 2x_6 + x_7 + 2x_8 + x_9 = s_1 + s_2 + s_3 + s_4 $$ 
+is not satisfied. Remaining permutations can then be tested against the system of equations displayed above to identify valid solutions.
+
+<<permutation,echo=FALSE>>=
+## Taken from: http://stackoverflow.com/questions/11095992
+permutations <- function(n){
+  if(n==1){
+    return(matrix(1))
+  } else {
+    sp <- permutations(n-1)
+    p <- nrow(sp)
+    A <- matrix(nrow=n*p,ncol=n)
+    
+    for(i in 1:n){
+      A[(i-1)*p+1:p,] <- cbind(i,sp+(sp>=i))
+      }
+    return(A)
+  }
+}
+@
+
+
+<<sujiko, echo=FALSE>>=
+sujiko <- function(sums, squares){
+  empty <- which(squares == 0, arr.ind = TRUE)
+  filled_idx <- which(squares != 0, arr.ind = TRUE)
+  filled_vals <- squares[c(filled_idx)]
+  
+  n <- 9 - length(filled_vals)
+  
+  # Create matrix containing all possible permutations
+  
+  if (n != 9){
+    missing <- tail(c(1:9), n = length(filled_vals))
+  
+    all_permutations <- data.frame(permutations(n))
+  
+    for (i in seq(1,length(missing), by=1)){
+      all_permutations[all_permutations == filled_vals[i]] <- missing[i]
+    }
+  
+    for (i in seq(1,length(missing), by = 1)){
+      all_permutations <- as.data.frame(append(all_permutations, 
+                                               list(filled_vals[i]), 
+                                               after = (filled_idx[i]-1)))
+    }
+  } else {
+    all_permutations <- data.frame(permutations(n))
+  }
+
+  sum_of_sums <- sum(sums)
+  
+  is_valid <- function(row){
+    if (((row[1] + (2*row[2]) + row[3] + (2*row[4]) + (4*row[5]) 
+          + (2*row[6]) + row[7] + (2*row[8]) + row[9]) == sum_of_sums) && 
+        ((row[1] + row[2] + row[4] + row[5]) == sums[1]) &&  
+        ((row[2] + row[3] + row[5] + row[6]) == sums[2]) && 
+        ((row[4] + row[5] + row[7] + row[8]) == sums[3])){
+      return (TRUE)
+      }
+    else {
+      return (FALSE)
+    }
+  }
+
+  all_permutations_valid <- apply(all_permutations, 1, is_valid)
+  
+  solutions_idx <- which(unlist(all_permutations_valid))
+  
+  all_solutions <- list()
+  
+  if (length(solutions_idx) == 1){
+    print(paste(length(solutions_idx), "solution to Sujiko puzzle"))
+    all_solutions <- (all_permutations[solutions_idx,])
+    colnames(all_solutions) <- NULL
+    rownames(all_solutions) <- "Solution: "
+    print(all_solutions)
+    valid_solutions <- data.frame(all_solutions)
+  } else if (length(solutions_idx) > 1) {
+    print(paste(length(solutions_idx), "solutions to Sujiko puzzle"))
+    for (i in solutions_idx){
+      solution_matrix <- (all_permutations[i,])
+      all_solutions[[length(all_solutions) + 1]] <- solution_matrix
+      colnames(all_solutions[[length(all_solutions)]]) <- NULL
+      rownames(all_solutions[[length(all_solutions)]]) <- "Possible solution: "
+    }
+    for (i in seq(1, length(all_solutions), by=1)){
+      print(all_solutions[[i]])
+    }
+    valid_solutions <- data.frame(matrix(unlist(all_solutions), 
+                                         nrow=length(all_solutions), 
+                                         byrow=TRUE))
+  } else if (length(solutions_idx) == 0){
+    valid_solutions <- "NO VALID SOLUTION"
+    print("No solution to Sujiko puzzle")
+  }
+  
+  return (valid_solutions)  
+}
+@
+
+\begin{enumerate}
+\setcounter{enumi}{2}
+\item \textit{Solutions to problems in Figure 1.}
+\end{enumerate}
+
+Solution(s) to puzzle A.
+<<all_solutions_1, echo=FALSE>>=
+all_solutions_1 <- sujiko(data1('s1.dat'), data1('g1.dat'))
+@
+
+Solution(s) to puzzle B.
+<<all_solutions_2, echo=FALSE>>=
+all_solutions_2 <- sujiko(data1('s2.dat'), data1('g2.dat'))
+@
+
+Solution(s) to puzzle C.
+<<all_solutions_3, echo=FALSE>>=
+all_solutions_3 <- sujiko(data1('s3.dat'), data1('g3.dat'))
+@
+
+The first/unique solution to each puzzle A, B, and C can be plotted onto the game grid, as seen in Figure \ref{fig:solved_sujiko}. A single solution is visualised as some puzzles have up to 64 possible solutions. 
+
+\begin{figure}[h!]
+\centering
+<<solutions, fig=TRUE, fig.width=9, fig.height=3, echo=FALSE>>=
+par(mfrow=c(1,3),mar=c(2,2,1.5,1))
+if (nrow(all_solutions_1)>1) {
+  drawgrid(data1('s1.dat'), all_solutions_1[1,],
+         main='First solution to A')
+} else if (nrow(all_solutions_1) == 1) {
+  drawgrid(data1('s1.dat'), all_solutions_1, 
+         main='Solution to A')
+}
+
+if (nrow(all_solutions_2)>1) {
+  drawgrid(data1('s2.dat'), all_solutions_2[1,],
+         main='First solution to B')
+} else if (nrow(all_solutions_2) == 1) {
+  drawgrid(data1('s2.dat'), all_solutions_2, 
+         main='Solution to B')
+}
+
+if (nrow(all_solutions_3)>1) {
+  drawgrid(data1('s3.dat'), all_solutions_3[1,], 
+         main='Solution to C')
+} else {
+  drawgrid(data1('s3.dat'), all_solutions_3,
+         main='First solution to C')
+}
+@
+\caption{\small{Solutions to the Sujiko problems shown in Figure \ref{fig:unsolved_sujiko}.}}
+\label{fig:solved_sujiko}
+\end{figure}
+
+\pagebreak
+\section{Permutation Testing}
+<<read_data2, echo=FALSE>>=
+data2 <- function(d) {
+read.csv(paste0("https://raw.githubusercontent.com/sje30/sp2022/",
+"main/assigns/a2/p/",d))
+}
+
+expt1 <- data2('expt1.dat')
+expt2 <- data2('expt2.dat')
+@
+
+A permutation test is a \textbf{non parametric} statistical hypothesis test which builds a sampling distribution by re-sampling observed data. The only assumption of a permutation test is that the observations are exchangeable. Its aim is to determine whether the observed difference between sample means $\bar{x}_A$ and $\bar{x}_B$ is large enough to reject, at some significance level, the null hypothesis $H_0$: that the data collected for individuals from group $A$ is from the same distribution as that drawn from $B$. 
+
+To perform the test, we obtain the distribution of the test statistic ($\vert\bar{x}_A$ - $\bar{x}_B\vert$) by calculating all its possible values under different permutations of the group labels $A$ and $B$. The p-value is then calculated as the proportion of sampled permutations where the test statistic is greater than the observed value of the test statistic $T_{obs}$.
+
+\subsection{Permutation tests on experimental data}
+
+We perform a permutation test on the experimental datasets collected as part of Experiments 1 and 2. An overview of the data is given in Table \ref{tab:summary}, and the distribution of the random variables for the control (ctl) and treatment (exp) groups in each experiment is visualised in Figures \ref{fig:distr1} and \ref{fig:distr2}.
+
+<<X_A_X_B, echo=FALSE>>=
+mean_exp1 <- round(tapply(expt1$val, expt1$group, mean),3)
+n_exp1 <- tapply(expt1$val, expt1$group, length)
+t_obs1 <- abs((mean_exp1[[1]]-mean_exp1[[2]]))
+
+mean_exp2 <- round(tapply(expt2$val, expt2$group, mean),3)
+n_exp2 <- tapply(expt2$val, expt2$group, length)
+t_obs2 <- abs((mean_exp2[[1]]-mean_exp2[[2]]))
+@
+
+\begin{figure}[h!]
+\centering
+<<distributions1, fig=TRUE, fig.width=6, fig.height=2, echo=FALSE>>=
+library(ggplot2)
+ggplot(expt1, aes(x = val)) +
+  geom_density(aes(color = group, fill = group), 
+               alpha = 0.4) +
+  geom_vline(xintercept = tapply(expt1$val, expt1$group, mean), col = c('deepskyblue', 'darkorchid')) +
+  scale_color_manual(values = c("deepskyblue", "darkorchid")) +
+  scale_fill_manual(values = c("deepskyblue", "darkorchid")) +
+  theme_bw() +
+  labs(x = "Values", y='Density', title='Distribution of data for Experiment 1') +
+  theme(plot.title = element_text(hjust = 0.5), text = element_text(size = 10))
+
+@
+\caption{\small{Distribution of random variables $X_{ctl}$ and $X_{exp}$ in Experiment 1, with mean of each group shown as a vertical line. Data for the control group is shown in cyan, whereas data relative to the experimental group is shown in purple.}}\label{fig:distr1}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+<<distributions2, fig=TRUE, fig.width=6, fig.height=2, echo=FALSE>>=
+ggplot(expt2, aes(x = val)) +
+  geom_density(aes(color = group, fill = group), 
+               alpha = 0.4) +
+  geom_vline(xintercept = tapply(expt2$val, expt2$group, mean), col = c('deepskyblue', 'darkorchid')) +
+  scale_color_manual(values = c("deepskyblue", "darkorchid")) +
+  scale_fill_manual(values = c("deepskyblue", "darkorchid")) +
+  theme_bw() +
+  labs(x = "Values", y='Density', title='Distribution of data for Experiment 1') +
+  theme(plot.title = element_text(hjust = 0.5), text = element_text(size = 10))
+@
+\caption{\small{Distribution of random variables $X_{ctl}$ and $X_{exp}$ in Experiment 2, with mean of each group shown as a vertical line. Data for the control group is shown in cyan, whereas data relative to the experimental group is shown in purple.}}\label{fig:distr2}
+\end{figure}
+
+\begin{table}[ht!]
+  \caption{\small{Summary of sample data for Experiments 1 and 2.}}
+  \label{tab:summary}
+  \vspace{2ex}
+  \begin{minipage}[h]{0.45\textwidth}
+    \centering
+    \begin{tabular}{|c|c|c|}
+    \hline
+    \multicolumn{3}{|c|}{\textbf{Overview of data for Experiment 1}} \\ \hline
+    & Control & Experiment \\ \hline
+    $n$ & \Sexpr{n_exp1[[1]]} & \Sexpr{n_exp1[[2]]} \\ \hline
+    $\bar{x}$ & \Sexpr{mean_exp1[[1]]} & \Sexpr{mean_exp1[[2]]} \\ \hline
+    $T_{obs}$ & \multicolumn{2}{|c|}{\Sexpr{t_obs1}} \\
+    \hline
+    \end{tabular}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[h]{0.45\textwidth}
+    \centering
+    \begin{tabular}{|c|c|c|}
+    \hline
+    \multicolumn{3}{|c|}{\textbf{Overview of data for Experiment 2}} \\ \hline
+    & Control & Experiment \\ \hline
+    $n$ & \Sexpr{n_exp2[[1]]} & \Sexpr{n_exp2[[2]]} \\ \hline
+    $\bar{x}$ & \Sexpr{mean_exp2[[1]]} & \Sexpr{mean_exp2[[2]]} \\ \hline
+    $T_{obs}$ & \multicolumn{2}{|c|}{\Sexpr{t_obs2}}\\
+    \hline
+    \end{tabular}
+  \end{minipage}
+\end{table}
+
+A permutation test requires we compute all possible permutations of the data. However, the number of permutations exceeds what we can reasonably compute because of the large values of $n$ ($n =$ \Sexpr{nrow(expt1)} for Experiment 1, and $n =$ \Sexpr{nrow(expt2)} for Experiment 2, hence the number of permutations would exceed \Sexpr{factorial(nrow(expt1))} and \Sexpr{factorial(nrow(expt2))}, respectively). Hence, we perform an approximate permutation test - which is asymptotically equivalent to a permutation test - by Monte Carlo sampling. 
+
+The two-sided p-value of the test is then calculated as the proportion of the sampled permutations where the absolute difference is greater than the absolute value of the observed test statistic $\vert T_{obs}\vert$.
+
+<<permutation_test, echo=FALSE>>=
+
+# diff in means between two samples Tobs- STORE
+# calculate size na and nb
+# difference in sample mean calculated and recorded for every possible way 
+# of dividing pooled values into two groups of size na and nb
+# plot histogram of differences of means of permuted groupings
+
+permutation_test <- function(data){
+  ctl <- subset(data, group == 'ctl')
+  exp <- subset(data, group == 'exp')
+  
+  groups <- data$group
+  values <- as.numeric(data$val)
+    
+  n <- nrow(data)
+  Na <- nrow(ctl)
+  Nb <- nrow(exp)
+  
+  mean_a <- mean(ctl$val)
+  mean_b <- mean(exp$val)
+  
+  Tobs <- abs(mean_a - mean_b)
+  
+  one_test <- function(group, val, n){
+    distribution = c()
+    result = 0
+    
+    for (i in 1:n){
+      distribution[i] = diff(by(values, 
+                                sample(groups, 
+                                       length(groups), 
+                                       FALSE), 
+                                mean))
+    }
+    
+    result = sum(abs(distribution) >= Tobs)/(n)
+    return(list(result,distribution))
+  }
+  
+  perm_test <- one_test(values, groups, 10000)
+  
+  return(list(perm_test, Tobs))
+}
+
+plot_permutation_test_results <- function(ptest_results){
+  h <- hist(ptest_results[[1]][[2]], breaks=100, plot=FALSE)
+  cuts <- cut(h$breaks, c(-Inf, ptest_results[[2]], -(ptest_results[[2]]), Inf))
+  plot(h, col=c("deepskyblue", "azure", "deepskyblue")[cuts], 
+       main="Permutation Distribution", las=1, xlab='Test statistic', border="blue4")
+  abline(v=c(ptest_results[[2]], -(ptest_results[[2]])), 
+         lwd=2, col="blue4")
+}
+@
+
+The distribution of the test statistic for each experiment is shown in Figures \ref{fig:perm_distr1} and \ref{fig:perm_distr2}. The results of the test are summarised in Table \ref{perm_test_results}.
+
+\begin{figure}[h!]
+\centering
+<<permutation_test_exp1, fig=TRUE, fig.width=6, fig.height=3.5, echo=FALSE>>=
+permutation_test_exp1 <- permutation_test(expt1)
+plot_permutation_test_results(permutation_test_exp1)
+@
+\caption{\small{Distribution of the test statistic for Experiment 1. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{permutation_test_exp1[[2]]}).}}
+\label{fig:perm_distr1}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+<<permutation_test_exp2, fig=TRUE, fig.width=6, fig.height=3.5, echo=FALSE>>=
+permutation_test_exp2 <- permutation_test(expt2)
+plot_permutation_test_results(permutation_test_exp2)
+@
+\caption{\small{Distribution of the test statistic for Experiment 2. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{permutation_test_exp2[[2]]}).}}
+\label{fig:perm_distr2}
+\end{figure}
+
+<<p_vals, echo=FALSE>>=
+p_val1 <- permutation_test_exp1[[1]][[1]]
+p_val2 <- permutation_test_exp2[[1]][[1]]
+@
+
+
+\begin{table}[h!]
+\small
+\caption{\small{Summary of permutation test results for Experiments 1 and 2.}}\label{perm_test_results}
+\vspace{2ex}
+  \begin{minipage}[h]{0.45\textwidth}
+    \centering
+    \begin{tabular}{|c|c|}
+    \hline
+    \multicolumn{2}{|c|}{\textbf{Permutation test results: Exp. 1}} \\ \hline
+    Data & exp1\$val by exp1\$group \\ \hline
+    Mean in ctl group & \Sexpr{mean_exp1[[1]]} \\ \hline
+    Mean in exp group & \Sexpr{mean_exp1[[2]]} \\ \hline
+    $T_{obs}$ & {\Sexpr{t_obs1}} \\ \hline
+    p-value & \Sexpr{p_val1} \\
+    \hline
+    \end{tabular}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[h]{0.45\textwidth}
+    \centering
+    \begin{tabular}{|c|c|}
+    \hline
+    \multicolumn{2}{|c|}{\textbf{Permutation test results: Exp. 2}} \\ \hline
+    Data & exp2\$val by exp2\$group \\ \hline
+    Mean in ctl group & \Sexpr{mean_exp2[[1]]} \\ \hline
+    Mean in exp group & \Sexpr{mean_exp2[[2]]} \\ \hline
+    $T_{obs}$ & {\Sexpr{t_obs2}} \\ \hline
+    p-value & \Sexpr{p_val2} \\
+    \hline
+    \end{tabular}
+  \end{minipage}
+\end{table}
+
+We can compare the results of our permutation test to the results of other statistical tests, such as the t-test and the Wilcoxon ranked-sum test, on the same data. 
+
+The t-test is a \textbf{parametric} test of difference. We perform a Welch two-sample t-test to test the hypothesis that the two groups have equal means. Unlike the permutation test, the t-test assumes that data are independent, normally distributed, and that the groups have equal variance. If the value of the t-test statistic is in the upper or lower $100 x \frac{\alpha}{2}$\% percentile of the reference Student's t-distribution (and the p-value is $<0.05$), we reject the null hypothesis of no difference between groups ($H_0: \mu = \mu_0$) and conclude that the means in the two groups are not equal ($H_1: \mu \neq \mu_0$).
+
+The Wilcoxon ranked-sum test is a \textbf{non-paramteric} alternative to the two-sample t-test, used to compare the medians of two independent groups. In fact, the Wilcoxon test only makes the assumptions that samples are independent and that groups are have equal variance - it does not assume known distributions. The test probes whether two groups have the same distribution with the same median (hence whether the true location shift is equal to 0). Once again, if the p-value is $<0.05$, we can reject the null hypothesis ($H_0: \boldsymbol{A} = \boldsymbol{B}$) and conclude that the distribution of one population is shifted with respect to the other ($H_1: \boldsymbol{A} \neq \boldsymbol{B}$).
+
+<<t_test, echo=FALSE>>=
+t_test1 <- t.test(expt1$val ~ expt1$group)
+t_test2 <-t.test(expt2$val ~ expt2$group)
+@
+
+<<wilcoxon_test, echo=FALSE>>=
+wilcoxon_test1 <- wilcox.test(expt1$val ~ expt1$group, exact=FALSE)
+wilcoxon_test2 <- wilcox.test(expt2$val ~ expt2$group, exact=FALSE)
+@
+
+The results of the permutation test, the Welch two-sample t-test and the Wilcoxon ranked-sum test are shown in Tables \ref{tab:comparison1} and \ref{tab:comparison2}.
+
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{|l|llllll|}
+\hline
+\multicolumn{7}{|c|}{\textbf{Comparison between statistical tests performed on data from Exp. 1}} \\ \hline
+ & \multicolumn{2}{l|}{Permutation test} & \multicolumn{2}{l|}{Welch two-sample t-test} & \multicolumn{2}{l|}{Wilcoxon ranked-sum test} \\ \hline
+Test statistic & \multicolumn{1}{l|}{$T_{obs}$} & \multicolumn{1}{l|}{\Sexpr{round(t_obs1,2)}} & \multicolumn{1}{l|}{t} & \multicolumn{1}{l|}{\Sexpr{round(t_test1$statistic[[1]],2)}} & \multicolumn{1}{l|}{W} & \Sexpr{round(wilcoxon_test1$statistic[[1]],2)} \\ \hline
+p-value & \multicolumn{2}{l|}{\Sexpr{round(p_val1,2)}} & \multicolumn{2}{l|}{\Sexpr{round(t_test1$p.value,2)}} & \multicolumn{2}{l|}{\Sexpr{round(wilcoxon_test1$p.value,2)}} \\ \hline
+\end{tabular}
+\caption{\small{Comparison of results of the permutation test, the Welch two-sample t-test and the Wilcoxon ranked-sum test performed on the data from Experiment 1, to determine whether there is a statistically significant difference between the control and experiment groups.}}
+\label{tab:comparison1}
+\end{table}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{|l|llllll|}
+\hline
+\multicolumn{7}{|c|}{\textbf{Comparison between statistical tests performed on data from Exp. 2}} \\ \hline
+ & \multicolumn{2}{l|}{Permutation test} & \multicolumn{2}{l|}{Welch two-sample t-test} & \multicolumn{2}{l|}{Wilcoxon ranked-sum test} \\ \hline
+Test statistic & \multicolumn{1}{l|}{$T_{obs}$} & \multicolumn{1}{l|}{\Sexpr{round(t_obs2,2)}} & \multicolumn{1}{l|}{t} & \multicolumn{1}{l|}{\Sexpr{round(t_test2$statistic[[1]],2)}} & \multicolumn{1}{l|}{W} & \Sexpr{round(wilcoxon_test2$statistic[[1]],2)} \\ \hline
+p-value & \multicolumn{2}{l|}{\Sexpr{round(p_val2,2)}} & \multicolumn{2}{l|}{\Sexpr{round(t_test2$p.value,2)}} & \multicolumn{2}{l|}{\Sexpr{round(wilcoxon_test2$p.value,2)}} \\ \hline
+\end{tabular}
+\caption{\small{Comparison of results of the permutation test, the Welch two-sample t-test and the Wilcoxon ranked-sum test performed on the data from Experiment 2, to determine whether there is a statistically significant difference between the control and experiment groups.}}
+\label{tab:comparison2}
+\end{table}
+
+\subsection{Permutation tests on simulated data}
+We generate some simulated data to check whether the permutation test is working correctly. We generate four datasets, each containing a "control" (ctl) and an "experimental" (exp) group, where the data is sampled from distributions with the following characteristics:
+
+\begin{description}
+  \item[Simulation 1] Control group data ($n=17$) sampled from normal distribution with $\mu = 1, \sigma = 3$; experimental group data ($n=13$) sampled from normal distribution with $\mu = 1.2, \sigma = 3$
+  \item[Simulation 2] Control group data ($n=23$) sampled from normal distribution with $\mu = 14, \sigma = 8$; experimental group data ($n=18$) sampled from normal distribution with $\mu = 5, \sigma = 6$
+  \item[Simulation 3] Control group data ($n=12$) sampled from exponential distribution with $\lambda = 4$; experimental group data ($n=17$) sampled from exponential distribution with $\lambda = 3.9$
+  \item[Simulation 4] Control group data ($n=32$) sampled from exponential distribution with $\lambda = 9$; experimental group data ($n=32$) sampled from exponential distribution with $\lambda = 3.9$
+  \item[Simulation 5] Control group data ($n=18$) sampled from normal distribution with $\mu = 22, \sigma = 3$; experimental group data ($n=32$) sampled from chi-squared distribution with $k = 2$
+  \item[Simulation 6] Control group data ($n=18$) sampled from normal distribution with $\mu = 1, \sigma = 2$; experimental group data ($n=32$) sampled from chi-squared distribution with $k = 2$
+\end{description}
+
+Where data for the control and experimental groups are drawn from very similar distributions (same distribution, with similar mean and standard deviation/rate/degrees of freedom - as in simulations 1, 3, 6), the observed p-value should be relatively high ($>0.05$), indicating that no statistically significant differences are observed. Hence, the p-value should imply that the null hypothesis should not be rejected. Where data are drawn from different distributions or distributions with distinct mean and standard deviation/rate/degrees of freedom (simulations 2, 4, 5), we expect to observe a p-value which indicates there is a statistically significant difference in the distributions of the groups under study ($>0.05$). In this case, the p-value should be evidence that the null hypothesis is to be rejected.
+
+The distribution of the test statistic for permutation tests on each simulated dataset is shown in Figures \ref{fig:sim1}, \ref{fig:sim2}, \ref{fig:sim3}, \ref{fig:sim4}, \ref{fig:sim5}, and \ref{fig:sim6}. The observed p-values are stated in the Figure captions. The permutation test appears to work as expected.  
+
+\begin{figure}[h!]
+\centering
+<<sim_1, fig=TRUE, fig.width=6, fig.height=2.5, echo=FALSE>>=
+## Simulate normally distributed data, 
+## two groups with similar means
+ctl1 <- rnorm(17, mean = 1, sd = 3)
+group_ctl1 <- rep(c("ctl"), times=(length(ctl1)))
+ctl_df1 <- data.frame(ctl1, group_ctl1)
+colnames(ctl_df1) <- c('val', 'group')
+exp1 <- rnorm(13, mean = 1.2, sd = 3)
+group_exp1 <- rep(c("exp"), times=(length(exp1)))
+exp_df1 <- data.frame(exp1, group_exp1)
+colnames(exp_df1) <- c('val', 'group')
+sim1 <- rbind(ctl_df1,exp_df1)
+
+permutation_test_sim1 <- permutation_test(sim1)
+plot_permutation_test_results(permutation_test_sim1)
+t_test_sim1 <- t.test(sim1$val ~ sim1$group)
+@
+\caption{\small{Distribution of the test statistic for simulated dataset 1. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{round(permutation_test_sim1[[2]],2)}). p-value: \Sexpr{format(permutation_test_sim1[[1]][[1]],digits=4)}.}}
+\label{fig:sim1}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+<<sim_2, fig=TRUE, fig.width=6, fig.height=2.5, echo=FALSE>>=
+## Simulate normally distributed data, two 
+## groups with different means
+ctl2 <- rnorm(23, mean = 14, sd = 8)
+group_ctl2 <- rep(c("ctl"), times=(length(ctl2)))
+ctl_df2 <- data.frame(ctl2, group_ctl2)
+colnames(ctl_df2) <- c('val', 'group')
+exp2 <- rnorm(18, mean = 5, sd = 6)
+group_exp2 <- rep(c("exp"), times=(length(exp2)))
+exp_df2 <- data.frame(exp2, group_exp2)
+colnames(exp_df2) <- c('val', 'group')
+sim2 <- rbind(ctl_df2,exp_df2)
+
+permutation_test_sim2 <- permutation_test(sim2)
+plot_permutation_test_results(permutation_test_sim2)
+t_test_sim2 <- t.test(sim2$val ~ sim2$group)
+@
+\caption{\small{Distribution of the test statistic for simulated dataset 2. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{round(permutation_test_sim2[[2]],2)}). p-value: \Sexpr{format(permutation_test_sim2[[1]][[1]],digits=4)}}}
+\label{fig:sim2}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+<<sim_3, fig=TRUE, fig.width=6, fig.height=2.5, echo=FALSE>>=
+## Simulate exponentially distributed data, 
+## two groups with similar means
+ctl3 <- rexp(12, 4)
+group_ctl3 <- rep(c("ctl"), times=(length(ctl3)))
+ctl_df3 <- data.frame(ctl3, group_ctl3)
+colnames(ctl_df3) <- c('val', 'group')
+exp3 <- rexp(17, 3.9)
+group_exp3 <- rep(c("exp"), times=(length(exp3)))
+exp_df3 <- data.frame(exp3, group_exp3)
+colnames(exp_df3) <- c('val', 'group')
+sim3 <- rbind(ctl_df3,exp_df3)
+
+permutation_test_sim3 <- permutation_test(sim3)
+plot_permutation_test_results(permutation_test_sim3)
+t_test_sim3 <- t.test(sim3$val ~ sim3$group)
+@
+\caption{\small{Distribution of the test statistic for simulated dataset 3. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{round(permutation_test_sim3[[2]],2)}). p-value: \Sexpr{format(permutation_test_sim3[[1]][[1]],digits=4)}}}
+\label{fig:sim3}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+<<sim_4, fig=TRUE, fig.width=6, fig.height=2.5, echo=FALSE>>=
+## Simulate exponentially distributed data, two 
+## groups with different means
+ctl4 <- rexp(32, 9)
+group_ctl4 <- rep(c("ctl"), times=(length(ctl4)))
+ctl_df4 <- data.frame(ctl4, group_ctl4)
+colnames(ctl_df4) <- c('val', 'group')
+exp4 <- rexp(21, 3.9)
+group_exp4 <- rep(c("exp"), times=(length(exp4)))
+exp_df4 <- data.frame(exp4, group_exp4)
+colnames(exp_df4) <- c('val', 'group')
+sim4 <- rbind(ctl_df4,exp_df4)
+
+permutation_test_sim4 <- permutation_test(sim4)
+plot_permutation_test_results(permutation_test_sim4)
+t_test_sim4 <- t.test(sim4$val ~ sim4$group)
+@
+\caption{\small{Distribution of the test statistic for simulated dataset 4. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{round(permutation_test_sim4[[2]],2)}). p-value: \Sexpr{format(permutation_test_sim4[[1]][[1]],digits=4)}}}
+\label{fig:sim4}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+<<sim_5, fig=TRUE, fig.width=6, fig.height=2.5, echo=FALSE>>=
+## Simulate normally distributed data for control group and 
+## chi-squared distributed data for experimental group, two 
+## groups with different means
+ctl5 <- rnorm(18, mean=22, sd=3)
+group_ctl5 <- rep(c("ctl"), times=(length(ctl5)))
+ctl_df5 <- data.frame(ctl5, group_ctl5)
+colnames(ctl_df5) <- c('val', 'group')
+exp5 <- rchisq(32, df=2)
+group_exp5 <- rep(c("exp"), times=(length(exp5)))
+exp_df5 <- data.frame(exp5, group_exp5)
+colnames(exp_df5) <- c('val', 'group')
+sim5 <- rbind(ctl_df5,exp_df5)
+
+permutation_test_sim5 <- permutation_test(sim5)
+plot_permutation_test_results(permutation_test_sim5)
+t_test_sim5 <- t.test(sim5$val ~ sim5$group)
+@
+\caption{\small{Distribution of the test statistic for simulated dataset 5. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{round(permutation_test_sim5[[2]],2)}). p-value: \Sexpr{format(permutation_test_sim5[[1]][[1]],digits=4)}.}}
+\label{fig:sim5}
+\end{figure}
+
+
+\begin{figure}[h!]
+\centering
+<<sim_6, fig=TRUE, fig.width=6, fig.height=2.5, echo=FALSE>>=
+## Simulate normally distributed data for control group and 
+## chi-squared distributed data for experimental group, two groups 
+## with similar distributions
+ctl6 <- rnorm(18, mean=1, sd=2)
+group_ctl6 <- rep(c("ctl"), times=(length(ctl6)))
+ctl_df6 <- data.frame(ctl6, group_ctl6)
+colnames(ctl_df6) <- c('val', 'group')
+exp6 <- rchisq(32, df=2)
+group_exp6 <- rep(c("exp"), times=(length(exp6)))
+exp_df6 <- data.frame(exp6, group_exp6)
+colnames(exp_df6) <- c('val', 'group')
+sim6 <- rbind(ctl_df6,exp_df6)
+
+permutation_test_sim6 <- permutation_test(sim6)
+plot_permutation_test_results(permutation_test_sim6)
+t_test_sim6 <- t.test(sim6$val ~ sim6$group)
+@
+\caption{\small{Distribution of the test statistic for simulated dataset 6. The positive and negative values of the observed test statistic are shown as vertical blue lines at $\pm T_{obs}$ ($=\pm$\Sexpr{round(permutation_test_sim6[[2]],2)}). p-value: \Sexpr{format(permutation_test_sim6[[1]][[1]],digits=4)}.}}
+\label{fig:sim6}
+\end{figure}
+
+The result of the permutation test on each simulated data set can also be compared to the result of a t-test on the same data set. We expect the t-test to return similar p-values to the permutation test where data is approximately normally distributed, and p-values to diverge where data are drawn from other distributions. Results of the comparison are summarised in Table \ref{tab:sim_data}.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|c|cc|cc|}
+\hline
+Simulated & \multicolumn{2}{c|}{Permutation test} & \multicolumn{2}{c|}{two-sample t-test} \\ \cline{2-5} 
+dataset & \multicolumn{1}{c|}{$T_{obs}$} & p-value & \multicolumn{1}{c|}{t statistic} & p-value \\ \hline
+1 & \multicolumn{1}{c|}{\Sexpr{format(permutation_test_sim1[[2]],digits=3)}} & \Sexpr{format(permutation_test_sim1[[1]][[1]],digits=4)} &  \multicolumn{1}{c|}{\Sexpr{format(t_test_sim1$statistic[[1]],digits=3)}} & \Sexpr{format(t_test_sim1$p.value,digits=4)} \\ \hline
+2 & \multicolumn{1}{c|}{\Sexpr{format(permutation_test_sim2[[2]],digits=3)}} & \Sexpr{format(permutation_test_sim2[[1]][[1]],digits=4)} & \multicolumn{1}{c|}{\Sexpr{format(t_test_sim2$statistic[[1]],digits=3)}} & \Sexpr{format(t_test_sim2$p.value,digits=4)} \\ \hline
+3 & \multicolumn{1}{c|}{\Sexpr{format(permutation_test_sim3[[2]],digits=3)}} & \Sexpr{format(permutation_test_sim3[[1]][[1]],digits=4)} &  \multicolumn{1}{c|}{\Sexpr{format(t_test_sim3$statistic[[1]],digits=3)}} & \Sexpr{format(t_test_sim3$p.value,digits=4)} \\ \hline
+4 & \multicolumn{1}{c|}{\Sexpr{format(permutation_test_sim4[[2]],digits=3)}} & \Sexpr{format(permutation_test_sim4[[1]][[1]],digits=4)} & \multicolumn{1}{c|}{\Sexpr{format(t_test_sim4$statistic[[1]],digits=3)}} & \Sexpr{format(t_test_sim4$p.value,digits=4)} \\ \hline
+5 & \multicolumn{1}{c|}{\Sexpr{format(permutation_test_sim5[[2]],digits=3)}} & \Sexpr{signif(permutation_test_sim5[[1]][[1]],digits=4)} & \multicolumn{1}{c|}{\Sexpr{format(t_test_sim5$statistic[[1]],digits=3)}} & \Sexpr{signif(t_test_sim5$p.value,digits=4)} \\ \hline
+6 & \multicolumn{1}{c|}{\Sexpr{format(permutation_test_sim6[[2]],digits=3)}} & \Sexpr{format(permutation_test_sim6[[1]][[1]],digits=4)} & \multicolumn{1}{c|}{\Sexpr{format(t_test_sim6$statistic[[1]],digits=3)}} & \Sexpr{format(t_test_sim6$p.value,digits=4)} \\ \hline
+\end{tabular}
+\caption{aaaaa}
+\label{tab:sim_data}
+\end{table}
+
+
+\clearpage
+\section{Appendix}
+\subsection{Appendix A - Sujiko Problems}
+<<drawgrid, eval=FALSE>>=
+@
+
+<<permutation,eval=FALSE>>=
+@
+
+<<sujiko, eval=FALSE>>=
+@
+
+<<all_solutions_1,eval=FALSE>>=
+@
+
+<<all_solutions_2,eval=FALSE>>=
+@
+
+<<all_solutions_3,eval=FALSE>>=
+@
+
+<<solutions, eval=FALSE>>=
+@
+
+
+\subsection{Appendix B - Permutation Testing}
+
+<<read_data, eval=FALSE>>=
+@
+
+<<X_A_X_B, eval=FALSE>>=
+@
+
+<<distributions1, eval=FALSE>>=
+@
+
+<<distributions2, eval=FALSE>>=
+@
+
+<<permutation_test, eval=FALSE>>=
+@
+
+<<permutation_test_exp1, eval=FALSE>>=
+@
+
+<<permutation_test_exp2, eval=FALSE>>=
+@
+
+<<t_test, eval=FALSE>>=
+@
+
+<<wilcoxon_test, eval=FALSE>>=
+@
+
+<<sim_1,  eval=FALSE>>=
+@
+
+<<sim_2, eval=FALSE>>=
+@
+
+<<sim_3, eval=FALSE>>=
+@
+
+<<sim_4, eval=FALSE>>=
+@
+
+<<sim_5,eval=FALSE>>=
+@
+
+<<sim_6,eval=FALSE>>=
+@
+
+\end{document}
+
